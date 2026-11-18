@@ -1,0 +1,418 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+env:
+  NODE_VERSION: '20'
+  YARN_VERSION: '4.x'
+
+jobs:
+  # ============================================
+  # Lint & TypeCheck (Mobile + Backend)
+  # ============================================
+  lint-typecheck:
+    name: Lint + TypeCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Install dependencies (Backend)
+        working-directory: ./backend
+        run: yarn install --frozen-lockfile
+
+      - name: Lint Mobile
+        working-directory: ./mobile
+        run: yarn lint
+
+      - name: TypeCheck Mobile
+        working-directory: ./mobile
+        run: yarn typecheck
+
+      - name: Lint Backend
+        working-directory: ./backend
+        run: yarn lint
+
+      - name: TypeCheck Backend
+        working-directory: ./backend
+        run: yarn typecheck
+
+  # ============================================
+  # Unit Tests (Mobile + Backend)
+  # ============================================
+  test-unit:
+    name: Testes Unitários
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Install dependencies (Backend)
+        working-directory: ./backend
+        run: yarn install --frozen-lockfile
+
+      - name: Test Unit Mobile
+        working-directory: ./mobile
+        run: yarn test:unit --coverage
+
+      - name: Test Unit Backend
+        working-directory: ./backend
+        run: yarn test:unit --coverage
+
+      - name: Upload Coverage (Mobile)
+        uses: codecov/codecov-action@v4
+        with:
+          flags: mobile
+          files: ./mobile/coverage/lcov.info
+          fail_ci_if_error: false
+
+      - name: Upload Coverage (Backend)
+        uses: codecov/codecov-action@v4
+        with:
+          flags: backend
+          files: ./backend/coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ============================================
+  # Integration Tests (Backend)
+  # ============================================
+  test-integration:
+    name: Testes Integração (Backend)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_DB: test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd="pg_isready -U test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Backend)
+        working-directory: ./backend
+        run: yarn install --frozen-lockfile
+
+      - name: Run migrations
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+        run: yarn db:migrate
+
+      - name: Test Integration
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-testing-only-32-chars
+          BETTER_AUTH_SECRET: test-secret-key-for-testing-only-32-chars
+          NODE_ENV: test
+        run: yarn test:integration
+
+  # ============================================
+  # Validate SRS
+  # ============================================
+  validate-srs:
+    name: Validação SRS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Validate SRS
+        run: node scripts/validate-srs.js docs/SRS.md
+
+  # ============================================
+  # SAST Security Scan
+  # ============================================
+  sast:
+    name: SAST (kalimaster-sast)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Install dependencies (Backend)
+        working-directory: ./backend
+        run: yarn install --frozen-lockfile
+
+      - name: Run SAST
+        run: |
+          # Mobile
+          cd mobile && npx kalimaster-sast || true
+          # Backend
+          cd ../backend && npx kalimaster-sast || true
+
+  # ============================================
+  # Build Mobile Development
+  # ============================================
+  build-mobile-dev:
+    name: Build Mobile Development
+    needs: [lint-typecheck, test-unit, validate-srs, sast]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Build Android Development
+        working-directory: ./mobile
+        run: eas build --profile development --platform android --non-interactive --no-wait
+
+      - name: Build iOS Development
+        working-directory: ./mobile
+        run: eas build --profile development --platform ios --non-interactive --no-wait
+
+  # ============================================
+  # Build Mobile Production
+  # ============================================
+  build-mobile-prod:
+    name: Build Mobile Production
+    needs: [lint-typecheck, test-unit, test-integration, validate-srs, sast]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+
+      - name: Install dependencies (Mobile)
+        working-directory: ./mobile
+        run: yarn install --frozen-lockfile
+
+      - name: Build Production (All Platforms)
+        working-directory: ./mobile
+        run: eas build --profile production --platform all --non-interactive --wait
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-builds
+          path: builds/
+          retention-days: 30
+
+  # ============================================
+  # Build Backend Docker
+  # ============================================
+  build-backend-docker:
+    name: Build Backend Docker
+    needs: [lint-typecheck, test-unit, test-integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: entregafacil-api:${{ github.sha }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================================
+  # Deploy Staging (Backend)
+  # ============================================
+  deploy-staging:
+    name: Deploy Staging
+    needs: [build-backend-docker]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Staging VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/entregafacil-staging
+            git pull origin develop
+            docker compose -f docker-compose.yml -f docker-compose.staging.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d --remove-orphans
+            docker image prune -f
+
+      - name: Health Check Staging
+        run: |
+          sleep 30
+          curl -f https://api-staging.entregafacil.app/health/ready || exit 1
+
+  # ============================================
+  # Deploy Production (Backend)
+  # ============================================
+  deploy-production:
+    name: Deploy Production
+    needs: [build-backend-docker, build-mobile-prod]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Production VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/entregafacil-prod
+            git pull origin main
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+
+      - name: Health Check Production
+        run: |
+          sleep 30
+          curl -f https://api.entregafacil.app/health/ready || exit 1
+
+  # ============================================
+  # Monthly Routing Update
+  # ============================================
+  update-routing:
+    name: Atualização Mensal Roteamento
+    on:
+      schedule:
+        - cron: '0 3 1 * *'  # Todo dia 1 às 03:00 UTC
+      workflow_dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Brazil PBF
+        run: |
+          wget -O brazil.osm.pbf https://download.geofabrik.de/south-america/brazil-latest.osm.pbf
+
+      - name: OSRM Extract (MLD)
+        run: |
+          docker run -v ${PWD}:/data ghcr.io/project-osrm/osrm-backend:v5.27.0 \
+            osrm-extract -p /opt/car.lua /data/brazil.osm.pbf
+          docker run -v ${PWD}:/data ghcr.io/project-osrm/osrm-backend:v5.27.0 \
+            osrm-partition /data/brazil.osrm
+          docker run -v ${PWD}:/data ghcr.io/project-osrm/osrm-backend:v5.27.0 \
+            osrm-customize /data/brazil.osrm
+
+      - name: Deploy OSRM to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            rsync -avz ${{ github.workspace }}/brazil.osrm.* /data/osrm/
+            docker compose -f /opt/entregafacil-prod/docker-compose.routing.yml restart osrm
+
+      - name: GraphHopper Import
+        run: |
+          docker run -v ${PWD}:/data ghcr.io/graphhopper/graphhopper:11.1 \
+            java -Xmx8g -jar graphhopper-web-11.1.jar import /data/brazil.osm.pbf
+
+      - name: Deploy GraphHopper to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            rsync -avz ${{ github.workspace }}/gh-data/ /data/graphhopper/
+            docker compose -f /opt/entregafacil-prod/docker-compose.routing.yml restart graphhopper

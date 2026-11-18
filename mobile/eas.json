@@ -1,0 +1,85 @@
+{
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "gradleCommand": ":app:assembleDebug",
+        "buildType": "apk",
+        "withoutCredentials": false
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Debug"
+      },
+      "env": {
+        "NODE_ENV": "development",
+        "EXPO_PUBLIC_API_URL": "https://api-staging.entregafacil.app",
+        "EXPO_PUBLIC_EVOLUTION_URL": "https://evolution-staging.entregafacil.app"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "withoutCredentials": false
+      },
+      "ios": {
+        "enterpriseProvisioning": "adhoc",
+        "buildConfiguration": "Release"
+      },
+      "env": {
+        "NODE_ENV": "staging",
+        "EXPO_PUBLIC_API_URL": "https://api-staging.entregafacil.app",
+        "EXPO_PUBLIC_EVOLUTION_URL": "https://evolution-staging.entregafacil.app"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "aab",
+        "withoutCredentials": false,
+        "credentialsSource": "remote"
+      },
+      "ios": {
+        "enterpriseProvisioning": "app-store",
+        "buildConfiguration": "Release",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_API_URL": "https://api.entregafacil.app",
+        "EXPO_PUBLIC_EVOLUTION_URL": "https://evolution.entregafacil.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal",
+        "changesNotSentForReview": true
+      },
+      "ios": {
+        "appleId": "dev@entregafacil.app",
+        "ascAppId": "6449123456",
+        "appleTeamId": "ABC123DEFG"
+      }
+    }
+  },
+  "experimental": {
+    "cache": {
+      "android": {
+        "enabled": true,
+        "key": "android-${{ hash_files('**/yarn.lock') }}-${{ hash_files('**/gradle/**') }}"
+      },
+      "ios": {
+        "enabled": true,
+        "key": "ios-${{ hash_files('**/yarn.lock') }}-${{ hash_files('**/Podfile.lock') }}"
+      }
+    }
+  }
+}

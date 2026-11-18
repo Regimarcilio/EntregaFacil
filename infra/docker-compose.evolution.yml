@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Evolution API (WhatsApp Integration)
+  evolution:
+    image: evoapicloud/evolution-api:latest
+    container_name: entregafacil-evolution
+    environment:
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://${POSTGRES_USER:-entregafacil}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-evolution}
+      - REDIS_URI=redis://redis:6379
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
+      - CONFIG_SESSION_PHONE_CLIENT=EntregaFacil
+      - CONFIG_SESSION_PHONE_NAME=EntregaFacil
+      - CONFIG_WEBHOOK_GLOBAL_ENABLED=true
+      - CONFIG_WEBHOOK_GLOBAL_URL=https://api.entregafacil.app/webhook/evolution
+      - CONFIG_WEBHOOK_GLOBAL_EVENTS=messages.upsert,connection.update,qrcode.updated,chats.upsert,contacts.upsert
+      - CONFIG_MANAGER_ENABLED=true
+      - CONFIG_MANAGER_USERNAME=admin
+      - CONFIG_MANAGER_PASSWORD=${EVOLUTION_MANAGER_PASSWORD}
+      - NODE_ENV=production
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    networks:
+      - entregafacil-network
+
+  # PostgreSQL para Evolution (pode ser o mesmo do backend, mas separado para isolamento)
+  postgres-evolution:
+    image: postgis/postgis:16-3.5
+    container_name: entregafacil-postgres-evolution
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD}
+    volumes:
+      - evolution_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - entregafacil-network
+
+  # Redis para Evolution (pode compartilhar com backend)
+  # redis-evolution:
+  #   image: redis:7-alpine
+  #   command: redis-server --appendonly yes
+  #   volumes:
+  #     - redis_evolution_data:/data
+
+volumes:
+  evolution_data:
+
+networks:
+  entregafacil-network:
+    external: true

@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  # PostgreSQL com PostGIS
+  postgres:
+    image: postgis/postgis:16-3.5
+    container_name: entregafacil-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-entregafacil}
+      POSTGRES_USER: ${POSTGRES_USER:-entregafacil}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-entregafacil} -d ${POSTGRES_DB:-entregafacil}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    networks:
+      - entregafacil-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: entregafacil-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - entregafacil-network
+
+  # MinIO (S3-compatible storage)
+  minio:
+    image: minio/minio:latest
+    container_name: entregafacil-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - entregafacil-network
+
+  # API Backend
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: entregafacil-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-entregafacil}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-entregafacil}?schema=public
+      DATABASE_POOL_SIZE: 20
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: entregafacil
+      MINIO_USE_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL}
+      OSRM_BASE_URL: http://osrm:5000
+      GRAPHHOPPER_BASE_URL: http://graphhopper:8989
+      EVOLUTION_BASE_URL: http://evolution:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - entregafacil-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: entregafacil-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - api
+      - osrm
+      - graphhopper
+      - evolution
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - entregafacil-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  osrm_data:
+  gh_data:
+  evolution_data:
+  certbot_conf:
+  certbot_www:
+
+networks:
+  entregafacil-network:
+    driver: bridge

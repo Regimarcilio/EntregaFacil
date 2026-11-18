@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # OSRM Routing Engine
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.0
+    container_name: entregafacil-osrm
+    command: >
+      osrm-routed
+      --algorithm mld
+      /data/brazil.osrm
+    volumes:
+      - osrm_data:/data
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+    networks:
+      - entregafacil-network
+
+  # GraphHopper (VRP with jsprit)
+  graphhopper:
+    image: ghcr.io/graphhopper/graphhopper:11.1
+    container_name: entregafacil-graphhopper
+    environment:
+      - JAVA_OPTS=-Xmx6g -Xms6g
+      - GRAPHHOPPER_DATA_DIR=/data
+      - GRAPHHOPPER_WEB_API_ENABLED=true
+    volumes:
+      - gh_data:/data
+    ports:
+      - "8989:8989"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+    networks:
+      - entregafacil-network
+
+volumes:
+  osrm_data:
+  gh_data:
+
+networks:
+  entregafacil-network:
+    external: true

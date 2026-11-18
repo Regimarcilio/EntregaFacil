@@ -1,0 +1,275 @@
+import { StyleSheet } from 'react-native';
+import { colors, spacing, borderRadius, typography, shadows } from '@/shared/constants/theme';
+
+export const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: spacing.md,
+    fontSize: typography.fontSize.md,
+    color: colors.textSecondary,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  waypointNumber: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+  },
+  waypointName: {
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.text,
+    marginTop: spacing.xs,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  statusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderLeftWidth: 4,
+    marginBottom: spacing.lg,
+    ...shadows.sm,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIndicator: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  statusInfo: {
+    flex: 1,
+  },
+  statusLabel: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+  },
+  statusDescription: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  section: {
+    marginBottom: spacing.lg,
+  },
+  sectionTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+    marginBottom: spacing.md,
+  },
+  addressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
+  },
+  addressIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  addressInfo: {
+    flex: 1,
+  },
+  addressName: {
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+  },
+  addressText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  destinatarioCard: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  destinatarioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  destinatarioLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.textSecondary,
+  },
+  destinatarioName: {
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text,
+    marginTop: spacing.xs,
+  },
+  destinatarioPhone: {
+    fontSize: typography.fontSize.md,
+    color: colors.primary,
+    marginLeft: spacing.md,
+  },
+  destinatarioNotificar: {
+    fontSize: typography.fontSize.sm,
+    color: colors.textSecondary,
+    marginLeft: spacing.md,
+  },
+  actionsSection: {
+    marginTop: spacing.xl,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    ...shadows.md,
+  },
+  entregarButton: {
+    backgroundColor: colors.success,
+  },
+  problemaButton: {
+    backgroundColor: colors.warning,
+  },
+  pularButton: {
+    backgroundColor: colors.textDisabled,
+  },
+  actionButtonText: {
+    marginLeft: spacing.sm,
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  waitingCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.surfaceVariant,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  waitingText: {
+    marginTop: spacing.md,
+    fontSize: typography.fontSize.md,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  proofCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    ...shadows.sm,
+  },
+  proofPhoto: {
+    height: 200,
+    width: '100%',
+  },
+  proofImage: {
+    width: '100%',
+    height: '100%',
+  },
+  proofDetails: {
+    padding: spacing.md,
+  },
+  proofRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  proofDetail: {
+    marginLeft: spacing.sm,
+    fontSize: typography.fontSize.sm,
+    color: colors.text,
+    flex: 1,
+  },
+  whatsappStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.successLight,
+  },
+  whatsappStatusText: {
+    marginLeft: spacing.sm,
+    fontSize: typography.fontSize.sm,
+    color: colors.success,
+    fontWeight: typography.fontWeight.medium,
+  },
+  problemCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  problemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  problemType: {
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.warning,
+    marginBottom: spacing.xs,
+  },
+  problemObs: {
+    fontSize: typography.fontSize.sm,
+    color: colors.text,
+  },
+  problemPhoto: {
+    width: '100%',
+    height: 200,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.md,
+  },
+});
