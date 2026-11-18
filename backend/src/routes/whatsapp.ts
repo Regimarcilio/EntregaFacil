@@ -4,10 +4,11 @@ import { z } from 'zod';
 import { getDB } from '../db';
 import { whatsappLogs } from '../db/schema/whatsapp-logs';
 import { motoristas } from '../db/schema/motoristas';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth';
 import { logger } from '../utils/logger';
 import fetch from 'node-fetch';
+import crypto from 'crypto';
 
 const whatsapp = new Hono();
 
@@ -210,11 +211,29 @@ whatsapp.post('/send', zValidator('json', sendMessageSchema), async (c) => {
 whatsapp.post('/webhook', async (c) => {
   const body = await c.req.json();
   
-  // Valida signature se configurado
+  // Valida HMAC signature se configurado
   const secret = process.env.EVOLUTION_WEBHOOK_SECRET;
   if (secret) {
-    const signature = c.req.header('x-signature');
-    // TODO: Validar HMAC signature
+    const signature = c.req.header('x-signature') || c.req.header('x-hub-signature-256');
+    if (!signature) {
+      logger.warn('Webhook received without signature');
+      return c.json({ error: 'Signature required' }, 401);
+    }
+    
+    // Calculate expected signature
+    const rawBody = JSON.stringify(body);
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
+    
+    const providedSignature = signature.replace('sha256=', '');
+    
+    // Timing-safe comparison
+    if (!crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(providedSignature))) {
+      logger.warn('Webhook signature mismatch');
+      return c.json({ error: 'Invalid signature' }, 401);
+    }
   }
 
   const { event, instance, data } = body;

@@ -7,6 +7,7 @@ import { rotas } from '../db/schema/rotas';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth';
 import { logger } from '../utils/logger';
+import { minioClient, generatePresignedPostPolicy } from '../services/minio';
 import crypto from 'crypto';
 
 const deliveries = new Hono();
@@ -36,6 +37,117 @@ const getDeliveriesQuerySchema = z.object({
   status: z.enum(['entregue', 'problema']).optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
+});
+
+const presignedUploadSchema = z.object({
+  contentType: z.string().regex(/^image\//),
+  bucket: z.string().default('entregafacil-provas'),
+  metadata: z.object({
+    deliveryId: z.string().uuid(),
+    waypointId: z.string().uuid(),
+    type: z.enum(['foto', 'assinatura']),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    accuracy: z.number().optional(),
+    timestamp: z.string().datetime().optional(),
+  }).optional(),
+});
+
+const deleteFileSchema = z.object({
+  bucket: z.string(),
+  key: z.string(),
+});
+
+// POST /deliveries/minio/presigned-upload - Gera URL pré-assinada (POST policy) para upload direto no MinIO
+deliveries.post('/minio/presigned-upload', zValidator('json', presignedUploadSchema), async (c) => {
+  const user = c.get('user');
+  const data = c.req.valid('json');
+  
+  try {
+    const bucket = data.bucket;
+    const objectName = `entregas/${data.metadata?.deliveryId}/${data.metadata?.waypointId}/${data.metadata?.type}/${crypto.randomUUID()}.${data.contentType === 'image/png' ? 'png' : 'jpg'}`;
+    
+    // Gera presigned POST policy para upload direto do mobile
+    const conditions: Record<string, string> = {
+      'key': objectName,
+      'Content-Type': data.contentType,
+      'x-amz-meta-delivery-id': data.metadata?.deliveryId || '',
+      'x-amz-meta-waypoint-id': data.metadata?.waypointId || '',
+      'x-amz-meta-type': data.metadata?.type || '',
+      'x-amz-meta-timestamp': data.metadata?.timestamp || new Date().toISOString(),
+      'x-amz-meta-motorista-id': user.motoristaId,
+    };
+    
+    const policy = await generatePresignedPostPolicy(bucket, conditions, 3600); // 1 hora de validade
+
+    // Gera URL pública de acesso (expira em 24h para uso posterior)
+    const publicUrl = await minioClient.presignedGetObject(bucket, objectName, 24 * 60 * 60);
+    
+    return c.json({
+      uploadUrl: policy.postURL,
+      key: objectName,
+      bucket,
+      publicUrl,
+      fields: {
+        'key': objectName,
+        'Content-Type': data.contentType,
+        'x-amz-meta-delivery-id': data.metadata?.deliveryId || '',
+        'x-amz-meta-waypoint-id': data.metadata?.waypointId || '',
+        'x-amz-meta-type': data.metadata?.type || '',
+        'x-amz-meta-timestamp': data.metadata?.timestamp || new Date().toISOString(),
+        'x-amz-meta-motorista-id': user.motoristaId,
+        'policy': policy.policy,
+        'signature': policy.signature,
+        'x-amz-algorithm': 'AWS4-HMAC-SHA256',
+        'x-amz-credential': `${process.env.MINIO_ACCESS_KEY}/${new Date().toISOString().split('T')[0].replace(/-/g, '')}/us-east-1/s3/aws4_request`,
+        'x-amz-date': new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z',
+      },
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to generate presigned URL');
+    return c.json({ error: 'Falha ao gerar URL de upload' }, 500);
+  }
+});
+
+// DELETE /deliveries/minio/delete - Deleta arquivo do MinIO
+deliveries.delete('/minio/delete', zValidator('json', deleteFileSchema), async (c) => {
+  const data = c.req.valid('json');
+  
+  try {
+    await minioClient.removeObject(data.bucket, data.key);
+    return c.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to delete file');
+    return c.json({ error: 'Falha ao deletar arquivo' }, 500);
+  }
+});
+
+// GET /deliveries/minio/list - Lista arquivos de uma entrega
+deliveries.get('/minio/list', zValidator('query', z.object({
+  deliveryId: z.string().uuid(),
+  bucket: z.string().default('entregafacil-provas'),
+})), async (c) => {
+  const { deliveryId, bucket } = c.req.valid('query');
+  
+  try {
+    const objects: any[] = [];
+    const stream = minioClient.listObjects(bucket, `entregas/${deliveryId}/`, true);
+    
+    for await (const obj of stream) {
+      const url = await minioClient.presignedGetObject(bucket, obj.name, 24 * 60 * 60);
+      objects.push({
+        key: obj.name,
+        size: obj.size,
+        lastModified: obj.lastModified,
+        url,
+      });
+    }
+    
+    return c.json({ objects });
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to list files');
+    return c.json({ error: 'Falha ao listar arquivos' }, 500);
+  }
 });
 
 // POST /deliveries - Cria nova comprovação de entrega
@@ -137,7 +249,6 @@ deliveries.get('/', zValidator('query', getDeliveriesQuerySchema), async (c) => 
 
   const conditions = [eq(entregas.motoristaId, user.motoristaId)];
   // Join com rotas para filtrar por motorista
-  // Como Drizzle não tem join fácil aqui, vamos buscar rotas do motorista primeiro
   const rotasDoMotorista = await db.select({ id: rotas.id })
     .from(rotas)
     .where(eq(rotas.motoristaId, user.motoristaId));
@@ -151,7 +262,7 @@ deliveries.get('/', zValidator('query', getDeliveriesQuerySchema), async (c) => 
   conditions.push(sql`${entregas.rotaId} IN (${sql.raw(rotaIds.map(() => '?').join(','))})`);
   
   if (rotaId) conditions.push(eq(entregas.rotaId, rotaId));
-  if (status) conditions.push(eq(entregas.tipoProblema, status ? 'problema' : null)); // Aproximação
+  if (status) conditions.push(eq(entregas.tipoProblema, status ? 'problema' : null));
   if (startDate) conditions.push(sql`${entregas.timestamp} >= ${startDate}`);
   if (endDate) conditions.push(sql`${entregas.timestamp} <= ${endDate}`);
 
@@ -206,7 +317,7 @@ deliveries.get('/:id', zValidator('param', z.object({ id: z.string().uuid() })),
   return c.json(entrega);
 });
 
-// POST /deliveries/proof - Upload de foto de comprovação (multipart)
+// POST /deliveries/proof - Upload de foto de comprovação (multipart) com MinIO
 deliveries.post('/proof', async (c) => {
   const user = c.get('user');
   
@@ -231,10 +342,28 @@ deliveries.post('/proof', async (c) => {
       return c.json({ error: 'Arquivo muito grande (máx 10MB)' }, 400);
     }
 
-    // Em produção: upload para MinIO/S3
-    // Por enquanto: salva localmente ou retorna URL mock
-    const fotoHash = crypto.createHash('sha256').update(await file.arrayBuffer()).digest('hex');
-    const fotoUrl = `https://cdn.entregafacil.app/entregas/${fotoHash}.jpg`;
+    // Calcula hash da foto
+    const arrayBuffer = await file.arrayBuffer();
+    const fotoHash = crypto.createHash('sha256').update(arrayBuffer).digest('hex');
+    
+    // Upload para MinIO
+    const objectName = `entregas/${crypto.randomUUID()}.jpg`;
+    await minioClient.putObject(
+      process.env.MINIO_BUCKET || 'entregafacil',
+      objectName,
+      Buffer.from(arrayBuffer),
+      file.size,
+      { 'Content-Type': file.type }
+    );
+    
+    // Gera URL pré-assinada (válida por 24h)
+    const fotoUrl = await minioClient.presignedGetObject(
+      process.env.MINIO_BUCKET || 'entregafacil',
+      objectName,
+      24 * 60 * 60
+    );
+
+    const fotoHash = crypto.createHash('sha256').update(Buffer.from(arrayBuffer)).digest('hex');
 
     // Verifica duplicata
     const db = getDB();
@@ -256,6 +385,57 @@ deliveries.post('/proof', async (c) => {
   } catch (error) {
     logger.error({ err: error }, 'Upload proof failed');
     return c.json({ error: 'Falha ao processar upload' }, 500);
+  }
+});
+
+// POST /deliveries/assinatura - Upload de assinatura (base64 PNG)
+deliveries.post('/assinatura', async (c) => {
+  const user = c.get('user');
+  
+  try {
+    const formData = await c.req.formData();
+    const base64 = formData.get('base64') as string;
+    const metadataStr = formData.get('metadata') as string;
+    
+    if (!base64 || !metadataStr) {
+      return c.json({ error: 'Base64 e metadata são obrigatórios' }, 400);
+    }
+
+    const metadata = JSON.parse(metadataStr);
+    
+    // Remove header data:image/png;base64, se presente
+    const base64Data = base64.replace(/^data:image\/png;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Valida tamanho (max 2MB para assinatura)
+    if (buffer.length > 2 * 1024 * 1024) {
+      return c.json({ error: 'Assinatura muito grande (máx 2MB)' }, 400);
+    }
+
+    // Upload para MinIO
+    const objectName = `assinaturas/${crypto.randomUUID()}.png`;
+    await minioClient.putObject(
+      process.env.MINIO_BUCKET || 'entregafacil',
+      objectName,
+      buffer,
+      buffer.length,
+      { 'Content-Type': 'image/png' }
+    );
+    
+    // Gera URL pré-assinada (válida por 24h)
+    const assinaturaUrl = await minioClient.presignedGetObject(
+      process.env.MINIO_BUCKET || 'entregafacil',
+      objectName,
+      24 * 60 * 60
+    );
+
+    return c.json({
+      assinaturaUrl,
+      size: buffer.length,
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Upload assinatura failed');
+    return c.json({ error: 'Falha ao processar assinatura' }, 500);
   }
 });
 

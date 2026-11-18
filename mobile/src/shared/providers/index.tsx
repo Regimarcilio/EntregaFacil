@@ -5,6 +5,7 @@ import { PaperProvider } from 'react-native-paper';
 import { lightTheme, darkTheme } from '../constants/theme';
 import { useColorScheme } from 'react-native';
 import { useAppStore } from '../store';
+import { NotificationsProvider } from './NotificationsProvider';
 
 export function Providers({ children }: { children: ReactNode }) {
   const systemColorScheme = useColorScheme();
@@ -15,7 +16,9 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <PaperProvider theme={theme}>
-      {children}
+      <NotificationsProvider>
+        {children}
+      </NotificationsProvider>
     </PaperProvider>
   );
 }

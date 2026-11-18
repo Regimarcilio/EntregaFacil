@@ -1,0 +1,103 @@
+# Fastlane Android Fastfile
+# Deploy automatizado para Google Play Store
+
+default_platform(:android)
+
+platform :android do
+  desc "Deploy para Internal Testing"
+  lane :internal do
+    gradle(
+      task: "clean bundleRelease",
+      project_dir: "./android"
+    )
+    
+    upload_to_play_store(
+      track: "internal",
+      aab: "./android/app/build/outputs/bundle/release/app-release.aab",
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app",
+      skip_upload_apk: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      release_status: "draft",
+      changes_not_sent_for_review: true
+    )
+  end
+
+  desc "Deploy para Closed Testing (Alpha)"
+  lane :alpha do
+    gradle(
+      task: "clean bundleRelease",
+      project_dir: "./android"
+    )
+    
+    upload_to_play_store(
+      track: "alpha",
+      aab: "./android/app/build/outputs/bundle/release/app-release.aab",
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app",
+      skip_upload_apk: true,
+      release_status: "draft"
+    )
+  end
+
+  desc "Deploy para Open Testing (Beta)"
+  lane :beta do
+    gradle(
+      task: "clean bundleRelease",
+      project_dir: "./android"
+    )
+    
+    upload_to_play_store(
+      track: "beta",
+      aab: "./android/app/build/outputs/bundle/release/app-release.aab",
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app",
+      skip_upload_apk: true,
+      release_status: "draft"
+    )
+  end
+
+  desc "Deploy para Produção"
+  lane :production do
+    gradle(
+      task: "clean bundleRelease",
+      project_dir: "./android"
+    )
+    
+    upload_to_play_store(
+      track: "production",
+      aab: "./android/app/build/outputs/bundle/release/app-release.aab",
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app",
+      skip_upload_apk: true,
+      release_status: "completed",
+      rollout: "0.1"  # 10% rollout inicial
+    )
+  end
+
+  desc "Promove build de track para track"
+  lane :promote do |options|
+    from_track = options[:from] || "beta"
+    to_track = options[:to] || "production"
+    
+    upload_to_play_store(
+      track: to_track,
+      track_promote_to: to_track,
+      track_promote_from: from_track,
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app"
+    )
+  end
+
+  desc "Lista versões disponíveis"
+  lane :versions do
+    versions = google_play_track_version_codes(
+      track: "internal",
+      json_key: "./google-play-service-account.json",
+      package_name: "com.entregafacil.app"
+    )
+    puts "Versões no Internal: #{versions.join(', ')}"
+  end
+end

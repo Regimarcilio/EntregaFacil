@@ -1,0 +1,64 @@
+{
+  "testRunner": "jest",
+  "specs": "e2e/**/*.test.ts",
+  "devices": {
+    "ios.simulator": {
+      "type": "ios.simulator",
+      "device": {
+        "type": "iPhone 15"
+      }
+    },
+    "android.emulator": {
+      "type": "android.emulator",
+      "avdName": "pixel_7_pro_api_34"
+    }
+  },
+  "apps": {
+    "ios.debug": {
+      "type": "ios.app",
+      "binaryPath": "ios/build/Build/Products/Debug-iphonesimulator/EntregaFácil.app"
+    },
+    "ios.release": {
+      "type": "ios.app",
+      "binaryPath": "ios/build/Build/Products/Release-iphonesimulator/EntregaFácil.app"
+    },
+    "android.debug": {
+      "type": "android.apk",
+      "binaryPath": "android/app/build/outputs/apk/debug/app-debug.apk",
+      "testBinaryPath": "android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+    },
+    "android.release": {
+      "type": "android.apk",
+      "binaryPath": "android/app/build/outputs/apk/release/app-release.apk"
+    }
+  },
+  "configurations": {
+    "ios": {
+      "device": "ios.simulator",
+      "app": "ios.debug"
+    },
+    "android": {
+      "device": "android.emulator",
+      "app": "android.debug"
+    },
+    "ios.ci": {
+      "device": "ios.simulator",
+      "app": "ios.release"
+    },
+    "android.ci": {
+      "device": "android.emulator",
+      "app": "android.release"
+    }
+  },
+  "behavior": {
+    "init": {
+      "exposeGlobals": true,
+      "reuse": true,
+      "launchApp": true,
+      "delete": false
+    },
+    "cleanup": {
+      "shutdownDevice": false
+    }
+  }
+}

@@ -1,0 +1,148 @@
+# Fastlane iOS Fastfile
+# Deploy automatizado para App Store Connect
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Build e upload para TestFlight (Internal Testing)"
+  lane :testflight do
+    setup_ci if ENV['CI']
+    
+    # Configura match para certificates (opcional - usar EAS credentials)
+    # match(type: "appstore", readonly: true)
+    
+    build_app(
+      scheme: "EntregaFácil",
+      workspace: "./ios/EntregaFácil.xcworkspace",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build/ios",
+      output_name: "EntregaFacil.ipa",
+      clean: true,
+      silent: true,
+      export_options: {
+        provisioningProfiles: {
+          "com.entregafacil.app" => "EntregaFacil App Store"
+        }
+      }
+    )
+    
+    upload_to_testflight(
+      api_key_path: "./appstoreconnect-api-key.json",
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+      notify_external_testers: false,
+      changelog: "Build automático via Fastlane"
+    )
+  end
+
+  desc "Build e upload para TestFlight (External Testing)"
+  lane :testflight_external do
+    setup_ci if ENV['CI']
+    
+    build_app(
+      scheme: "EntregaFácil",
+      workspace: "./ios/EntregaFácil.xcworkspace",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build/ios",
+      output_name: "EntregaFacil.ipa",
+      clean: true
+    )
+    
+    upload_to_testflight(
+      api_key_path: "./appstoreconnect-api-key.json",
+      skip_waiting_for_build_processing: false,
+      distribute_external: true,
+      groups: ["External Testers"],
+      notify_external_testers: true,
+      changelog: "Nova versão para testes externos"
+    )
+  end
+
+  desc "Deploy para App Store (Produção)"
+  lane :release do
+    setup_ci if ENV['CI']
+    
+    # Incrementa build number
+    increment_build_number(
+      xcodeproj: "./ios/EntregaFácil.xcodeproj"
+    )
+    
+    build_app(
+      scheme: "EntregaFácil",
+      workspace: "./ios/EntregaFácil.xcworkspace",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build/ios",
+      output_name: "EntregaFacil.ipa",
+      clean: true
+    )
+    
+    upload_to_app_store(
+      api_key_path: "./appstoreconnect-api-key.json",
+      skip_metadata: false,
+      skip_screenshots: false,
+      skip_binary_upload: false,
+      submit_for_review: false,
+      automatic_release: false,
+      force: true,
+      run_precheck_before_submit: true,
+      precheck_include_in_app_purchases: false
+    )
+  end
+
+  desc "Apenas faz upload do metadata (screenshots, descrição, etc)"
+  lane :metadata do
+    upload_to_app_store(
+      api_key_path: "./appstoreconnect-api-key.json",
+      skip_binary_upload: true,
+      skip_metadata: false,
+      skip_screenshots: false,
+      force: true
+    )
+  end
+
+  desc "Baixa metadata atual da App Store"
+  lane :download_metadata do
+    download_app_store_metadata(
+      api_key_path: "./appstoreconnect-api-key.json",
+      metadata_path: "./fastlane/metadata"
+    )
+  end
+
+  desc "Configura certificados com Match (opcional)"
+  lane :certificates do
+    match(
+      type: "appstore",
+      app_identifier: "com.entregafacil.app",
+      username: "dev@entregafacil.app",
+      team_id: "ABC123DEFG",
+      readonly: false,
+      force_for_new_devices: true
+    )
+  end
+
+  desc "Renova certificados expirados"
+  lane :renew_certificates do
+    match(
+      type: "appstore",
+      app_identifier: "com.entregafacil.app",
+      username: "dev@entregafacil.app",
+      team_id: "ABC123DEFG",
+      force: true
+    )
+  end
+
+  private_lane :setup_ci do
+    # Configura keychain para CI
+    create_keychain(
+      name: "fastlane",
+      password: ENV['MATCH_PASSWORD'] || "temp_password",
+      default_keychain: true,
+      unlock: true,
+      timeout: 3600,
+      lock_when_sleeps: false
+    )
+  end
+end

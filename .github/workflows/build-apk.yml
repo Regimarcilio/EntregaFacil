@@ -1,0 +1,109 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version name (optional)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '17'
+  ANDROID_SDK_VERSION: '34'
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+          ndk-version: r26b
+          build-tools-version: '34.0.0'
+          cmake-version: '3.22.1'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      - name: Install dependencies
+        working-directory: ./mobile
+        run: |
+          npm ci --legacy-peer-deps --prefer-offline=false --registry=https://registry.npmjs.org/
+
+      - name: Expo Prebuild
+        working-directory: ./mobile
+        run: |
+          npx expo prebuild --clean --platform android
+
+      - name: Build Release APK
+        working-directory: ./mobile/android
+        run: |
+          ./gradlew clean assembleRelease --no-daemon
+
+      - name: Find APK
+        id: find-apk
+        run: |
+          APK_PATH=$(find mobile/android/app/build/outputs/apk/release -name "*.apk" -type f | head -1)
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Found APK at: $APK_PATH"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: entregafacil-apk
+          path: ${{ steps.find-apk.outputs.apk_path }}
+          retention-days: 30
+          compression-level: 0
+
+      - name: Create Release (on main branch)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "EntregaFácil v${{ github.run_number }}"
+          files: ${{ steps.find-apk.outputs.apk_path }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

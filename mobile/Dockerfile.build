@@ -1,0 +1,37 @@
+FROM cirrusci/android-sdk:34
+
+USER root
+
+# Install Node.js 20
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg2 \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH=$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH=$PATH:$JAVA_HOME/bin
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install npm deps
+RUN npm cache clean --force && \
+    npm install --legacy-peer-deps --registry=https://registry.npmjs.org/
+
+# Copy source
+COPY . .
+
+# Prebuild
+RUN npx expo prebuild --clean --platform android
+
+# Build APK
+RUN cd android && ./gradlew clean assembleRelease
+
+# Output APK location
+RUN echo "APK at: $(find android -name '*.apk' -type f | head -1)"

@@ -1,0 +1,11 @@
+# Fastlane Android Appfile
+# Configuração para deploy na Google Play Store
+
+package_name "com.entregafacil.app"
+json_key_file "./google-play-service-account.json"
+
+# Para diferentes tracks
+# track "internal"      # Testes internos
+# track "alpha"         # Closed testing
+# track "beta"          # Open testing
+# track "production"    # Produção

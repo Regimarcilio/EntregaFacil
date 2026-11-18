@@ -1,0 +1,368 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # Database - PostgreSQL + PostGIS
+  # ===========================================
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: entregafacil-postgres-staging
+    environment:
+      POSTGRES_DB: entregafacil_staging
+      POSTGRES_USER: ${POSTGRES_USER:-entregafacil}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MAX_CONNECTIONS: 100
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-entregafacil} -d entregafacil_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+
+  # ===========================================
+  # Redis - Cache, Rate Limiting, Sessions
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: entregafacil-redis-staging
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_staging_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+
+  # ===========================================
+  # MinIO - S3 Compatible Storage
+  # ===========================================
+  minio:
+    image: minio/minio:latest
+    container_name: entregafacil-minio-staging
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL: https://minio-staging.entregafacil.app
+    volumes:
+      - minio_staging_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+
+  # ===========================================
+  # OSRM - Routing Engine
+  # ===========================================
+  osrm:
+    image: osrm/osrm-backend:v5.27.0
+    container_name: entregafacil-osrm-staging
+    command: >
+      sh -c "
+        osrm-extract -p /opt/car.lua /data/brazil-latest.osm.pbf &&
+        osrm-partition /data/brazil-latest.osrm &&
+        osrm-customize /data/brazil-latest.osrm &&
+        osrm-routed --algorithm mld /data/brazil-latest.osrm
+      "
+    volumes:
+      - osrm_staging_data:/data
+      - ./osrm-profiles:/opt:ro
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+
+  # ===========================================
+  # GraphHopper - VRP Fallback
+  # ===========================================
+  graphhopper:
+    image: graphhopper/graphhopper:8.0
+    container_name: entregafacil-graphhopper-staging
+    environment:
+      JAVA_OPTS: "-Xmx4g -Xms2g"
+      GRAPHHOPPER_DATA_PATH: /data
+      GRAPHHOPPER_OSM_FILE: /data/brazil-latest.osm.pbf
+      GRAPHHOPPER_PROFILES: "car"
+      GRAPHHOPPER_CH: "true"
+    volumes:
+      - graphhopper_staging_data:/data
+    ports:
+      - "8989:8989"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 6G
+        reservations:
+          cpus: '2'
+          memory: 3G
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+
+  # ===========================================
+  # Evolution API - WhatsApp
+  # ===========================================
+  evolution:
+    image: atendai/evolution-api:v1.9.0
+    container_name: entregafacil-evolution-staging
+    environment:
+      SERVER_PORT: 8080
+      SERVER_URL: https://evolution-staging.entregafacil.app
+      DATABASE_PROVIDER: postgres
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-entregafacil}:${POSTGRES_PASSWORD}@postgres:5432/entregafacil_staging?schema=evolution
+      DATABASE_SCHEMA: evolution
+      REDIS_URI: redis://redis:6379
+      REDIS_OPTIONS: '{"maxRetriesPerRequest": 3}'
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPIRATION_DAYS: 30
+      CORS_ORIGIN: https://staging.entregafacil.app,exp://staging.entregafacil.app
+      LOG_LEVEL: info
+      SQS_PROVIDER: redis
+      SQS_REDIS_URI: redis://redis:6379
+      INSTANCE_INTEGRATION: whatsapp-business
+      INSTANCE_REJECT_CALL: "true"
+      INSTANCE_MSG_CALLBACK: "true"
+      INSTANCE_GROUPS_IGNORE: "true"
+      INSTANCE_ALWAYS_ONLINE: "false"
+      INSTANCE_READ_MESSAGES: "false"
+      INSTANCE_READ_STATUS: "false"
+      INSTANCE_SYNC_FULL_HISTORY: "false"
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_URL: https://api-staging.entregafacil.app/webhook/evolution
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "true"
+      WEBHOOK_EVENTS_APPLICATION_STARTUP: "true"
+      WEBHOOK_EVENTS_QRCODE_UPDATED: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPSET: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPDATE: "true"
+      WEBHOOK_EVENTS_CHATS_UPSET: "true"
+      WEBHOOK_EVENTS_CONTACTS_UPSET: "true"
+      WEBHOOK_EVENTS_LABELS_EDIT: "true"
+      WEBHOOK_EVENTS_LABELS_ASSOCIATION: "true"
+    volumes:
+      - evolution_staging_data:/evolution/instances
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ===========================================
+  # Backend API - Hono/Node.js
+  # ===========================================
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.staging
+    container_name: entregafacil-api-staging
+    environment:
+      NODE_ENV: staging
+      PORT: 3000
+      LOG_LEVEL: debug
+      DATABASE_URL: postgresql://${POSTGRES_USER:-entregafacil}:${POSTGRES_PASSWORD}@postgres:5432/entregafacil_staging?schema=public
+      DATABASE_POOL_SIZE: 20
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: entregafacil
+      JWT_AUDIENCE: entregafacil-mobile
+      CORS_ORIGIN: https://staging.entregafacil.app,exp://staging.entregafacil.app
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: entregafacil
+      MINIO_PUBLIC_URL: https://minio-staging.entregafacil.app
+      OSRM_BASE_URL: http://osrm:5000
+      GRAPHHOPPER_BASE_URL: http://graphhopper:8989
+      EVOLUTION_BASE_URL: http://evolution:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET}
+      NOMINATIM_BASE_URL: https://nominatim.openstreetmap.org
+      NOMINATIM_EMAIL: staging@entregafacil.app
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ORG: entregafacil
+      SENTRY_PROJECT: backend-staging
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      osrm:
+        condition: service_healthy
+      graphhopper:
+        condition: service_healthy
+      evolution:
+        condition: service_healthy
+
+  # ===========================================
+  # Nginx Reverse Proxy + SSL
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    container_name: entregafacil-nginx-staging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.staging.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl-staging:/etc/nginx/ssl:ro
+      - ./certbot-staging:/var/www/certbot:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    networks:
+      - entregafacil-staging
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      evolution:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ===========================================
+  # Certbot - SSL Certificate Management
+  # ===========================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: entregafacil-certbot-staging
+    command: certonly --webroot --webroot-path=/var/www/certbot --email staging@entregafacil.app --agree-tos --no-eff-email -d api-staging.entregafacil.app -d evolution-staging.entregafacil.app -d minio-staging.entregafacil.app
+    volumes:
+      - ./ssl-staging:/etc/letsencrypt
+      - ./certbot-staging:/var/www/certbot
+    networks:
+      - entregafacil-staging
+    restart: "no"
+    profiles:
+      - certbot
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:
+  minio_staging_data:
+  osrm_staging_data:
+  graphhopper_staging_data:
+  evolution_staging_data:
+
+networks:
+  entregafacil-staging:
+    driver: bridge
+    name: entregafacil-staging-network

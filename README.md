@@ -1,220 +1,347 @@
-# EntregaFácil
+# EntregaFácil - Mobile App for Delivery Drivers
 
-> **Copiloto do motoboy:** Organiza endereços, calcula a melhor rota, navega offline, comprova entrega com foto+assinatura e avisa o cliente no WhatsApp automaticamente.
+[![Expo](https://img.shields.io/badge/Expo-51-black?logo=expo)](https://expo.dev)
+[![React Native](https://img.shields.io/badge/React_Native-0.74-blue?logo=react)](https://reactnative.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue?logo=typescript)](https://typescriptlang.org)
+[![EAS Build](https://img.shields.io/badge/EAS_Build-enabled-purple?logo=expo)](https://expo.dev/eas)
+[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
 
-## 📋 Visão Geral
+Aplicativo mobile para motoristas de entrega (motoboys, entregadores de app) que permite adicionar múltiplos endereços, calcula a rota ótima para todas as entregas, envia notificações WhatsApp ao concluir entregas e funciona offline.
 
-Aplicativo mobile (React Native + Expo) para motoristas de aplicativos de entrega (iFood, Uber Eats, 99Food, Rappi) e motoboys autônomos que precisam:
+## 🚀 Funcionalidades Principais
 
-- 📍 **Gerenciar endereços** - CRUD, autocomplete (OSM/Google), import CSV/WhatsApp
-- 🗺️ **Otimizar rotas** - OSRM (TSP guloso) + GraphHopper (VRP com restrições)
-- 🧭 **Navegar offline** - MapLibre + MBTiles (tiles vetoriais), turn-by-turn com voz
-- 📸 **Comprovar entregas** - Foto obrigatória + GPS + hash + assinatura digital
-- 💬 **WhatsApp automático** - Evolution API (Cloud API + Baileys), templates aprovados Meta
-- 🔄 **Sync offline-first** - Queue local idempotente + LWW conflict resolution
+### 📍 Gestão de Endereços
+- Cadastro manual e via busca (Nominatim/OpenStreetMap)
+- Importação via CSV
+- Compartilhamento via WhatsApp (recebe endereços)
+- Geocoding automático com validação
+
+### 🗺️ Rotas Otimizadas
+- Criação de rotas com múltiplos waypoints
+- Ordenação drag-and-drop
+- Otimização automática (TSP via OSRM)
+- Fallback para VRP com GraphHopper (janelas de tempo, capacidade)
+- Visualização no mapa (MapLibre + MBTiles offline)
+
+### 📦 Comprovação de Entrega
+- Captura de foto com validação GPS (precisão ≤ 50m)
+- Assinatura digital do destinatário
+- Registro de problemas (cliente ausente, endereço errado, recusou, outro)
+- Upload direto para MinIO (S3 compatible) com progresso
+
+### 💬 Notificações WhatsApp
+- Evolution API (Cloud API + Baileys fallback)
+- Templates pré-aprovados pelo Meta
+- Opt-in por destinatário (LGPD)
+- Remetente configurável (motorista ou destinatário)
+- Status em tempo real (enviado, entregue, lido)
+
+### 📱 Offline-First
+- Banco local SQLite (expo-sqlite)
+- Fila de sincronização otimista (15min intervalo)
+- Resolução de conflitos LWW + merge manual
+- Mapas offline (MBTiles por estado/região)
+- Sincronização apenas em Wi-Fi (configurável)
+
+### ⚙️ Configurações Avançadas
+- Tema (claro/escuro/sistema)
+- Unidades (métrico/imperial)
+- Voz na navegação + volume
+- Modo luva (áreas de toque maiores)
+- Auto-iniciar navegação
+- Sync apenas Wi-Fi
+- Notificações push
 
 ## 🏗️ Arquitetura
 
 ```
-┌─────────────────┐     ┌──────────────────────────────────────────┐
-│  Mobile App     │────►│  Backend API (Hono/Node.js)              │
-│  React Native   │     │  - Auth (Better Auth)                    │
-│  + Expo         │     │  - CRUD (Drizzle/PostgreSQL+PostGIS)     │
-│  Bare Workflow  │     │  - Sync Engine (Optimistic + LWW)        │
-└─────────────────┘     └──────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Mobile (React Native/Expo)               │
+├─────────────────────────────────────────────────────────────┤
+│  Expo Router + TypeScript + Zustand + React Query          │
+│  MapLibre + MBTiles + OSRM + Exo-Camera + Exo-Location     │
+│  Expo Notifications + Expo Updates (OTA)                   │
+└─────────────────────────────────────────────────────────────┘
                               │
-          ┌───────────────────┼───────────────────┐
-          ▼                   ▼                   ▼
-    ┌───────────┐       ┌─────────────┐    ┌─────────────┐
-    │   OSRM    │       │ GraphHopper │    │  Evolution  │
-    │  (TSP)    │       │  (jsprit)   │    │   API (WA)  │
-    └───────────┘       └─────────────┘    └─────────────┘
+                    HTTPS/REST + WebSocket
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    Backend (Node.js/Hono)                   │
+├─────────────────────────────────────────────────────────────┤
+│  PostgreSQL + PostGIS + Drizzle ORM                        │
+│  Redis (Rate Limit + Cache + Sessions)                     │
+│  MinIO (S3 compatible - fotos/assinaturas)                 │
+│  OSRM (Roteamento) + GraphHopper (VRP fallback)            │
+│  Evolution API (WhatsApp)                                   │
+│  Better Auth (JWT 15min + Refresh 30d)                     │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+## 🛠️ Stack Tecnológica
+
+### Mobile
+- **Framework**: Expo SDK 51 + React Native 0.74
+- **Language**: TypeScript 5.3
+- **Navigation**: Expo Router (file-based)
+- **State**: Zustand + TanStack Query
+- **Maps**: MapLibre React Native + MBTiles
+- **Routing**: OSRM (primário) + GraphHopper (fallback)
+- **Storage**: Expo SQLite + AsyncStorage
+- **Notifications**: Expo Notifications + Expo Updates
+- **Camera**: Expo Camera + Expo Image Picker
+- **Auth**: Better Auth (JWT + Refresh tokens)
+
+### Backend
+- **Runtime**: Node.js 20 + Hono
+- **Database**: PostgreSQL 16 + PostGIS 3
+- **ORM**: Drizzle ORM (type-safe)
+- **Cache/Queue**: Redis 7
+- **Storage**: MinIO (S3 API)
+- **Routing**: OSRM (docker) + GraphHopper (docker)
+- **WhatsApp**: Evolution API (self-hosted)
+- **Auth**: Better Auth (JWT HS256 + Refresh rotation)
+
+### DevOps
+- **CI/CD**: GitHub Actions
+- **Build**: EAS Build (Expo Application Services)
+- **Deploy**: Fastlane (Play Store + App Store)
+- **Monitoring**: Sentry + Grafana (Prometheus/Loki)
+- **Testing**: Detox (E2E) + Jest (Unit)
+- **Security**: SAST (ESLint Security) + DAST (OWASP ZAP)
+
+## 📋 Pré-requisitos
+
+- Node.js 20+
+- Yarn 1.22+
+- Expo CLI (`npm install -g expo-cli`)
+- EAS CLI (`npm install -g eas-cli`)
+- Docker + Docker Compose (para backend local)
+- Xcode 15+ (iOS)
+- Android Studio (Android)
 
 ## 🚀 Quick Start
 
-### Pré-requisitos
-- Node.js 20+
-- Yarn 4+ (Berry)
-- Docker + Docker Compose
-- Android Studio / Xcode (para bare workflow)
-
-### 1. Clone e Setup
+### 1. Clone e Configure
 ```bash
-git clone https://github.com/seu-org/entregafacil.git
-cd entregafacil
-```
+git clone https://github.com/entregafacil/mobile.git
+cd EntregaFacil
 
-### 2. Infraestrutura (Docker Compose)
-```bash
-cd infra
-cp .env.example .env
-# Edite as variáveis de ambiente
-docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-```
-
-### 3. Backend
-```bash
-cd backend
-cp .env.example .env
-# Edite as variáveis
+# Mobile
+cd mobile
+cp .env.example .env.local
 yarn install
-yarn db:migrate
-yarn db:seed  # opcional: dados de teste
-yarn dev
+
+# Backend
+cd ../backend
+cp .env.example .env
+docker-compose up -d
 ```
 
-### 4. Mobile
+### 2. Desenvolvimento Mobile
 ```bash
 cd mobile
-cp .env.example .env
-yarn install
-yarn start          # Expo Go (managed)
-# ou
-yarn prebuild       # Bare workflow (necessário para MapLibre Navigation SDK)
-yarn run:android
-yarn run:ios
+yarn start          # Expo dev server
+yarn android        # Android emulator
+yarn ios            # iOS simulator
+```
+
+### 3. Desenvolvimento Backend
+```bash
+cd backend
+docker-compose up -d    # PostgreSQL, Redis, MinIO, OSRM, GraphHopper
+yarn dev                # Hono dev server with hot reload
+```
+
+### 4. Build Preview
+```bash
+cd mobile
+eas build --profile preview --platform all
 ```
 
 ## 📁 Estrutura do Projeto
 
 ```
-entregafacil/
-├── mobile/                 # React Native + Expo
+EntregaFacil/
+├── mobile/                     # React Native App (Expo)
 │   ├── src/
-│   │   ├── app/           # Expo Router (file-based routing)
-│   │   ├── features/      # Features (addresses, routes, navigation, etc.)
-│   │   ├── shared/        # Shared (ui, hooks, store, api, constants)
-│   │   └── __tests__/
-│   ├── eas.json           # EAS Build config
-│   └── app.config.ts
-├── backend/               # Node.js + Hono + TypeScript
+│   │   ├── app/               # Expo Router pages
+│   │   │   ├── (tabs)/        # Tab navigation
+│   │   │   ├── route/         # Route flows
+│   │   │   ├── addresses/     # Address management
+│   │   │   └── settings/      # Settings screens
+│   │   ├── shared/
+│   │   │   ├── api/           # Axios client + sync
+│   │   │   ├── hooks/         # Custom hooks
+│   │   │   ├── store/         # Zustand store
+│   │   │   ├── services/      # Notifications, feature flags
+│   │   │   ├── constants/     # Theme, accessibility
+│   │   │   ├── providers/     # Context providers
+│   │   │   └── utils/         # Geo, performance
+│   │   └── components/        # Shared UI components
+│   ├── e2e/                   # Detox tests
+│   ├── scripts/               # Build, analysis scripts
+│   ├── app.config.ts          # Expo config
+│   ├── eas.json               # EAS Build config
+│   └── package.json
+│
+├── backend/                    # Node.js API (Hono)
 │   ├── src/
-│   │   ├── routes/        # API routes
-│   │   ├── services/      # External services (OSRM, Evolution, etc.)
-│   │   ├── db/            # Drizzle ORM + schemas
-│   │   └── middleware/
-│   └── Dockerfile
-├── infra/                 # Infrastructure as Code
-│   ├── docker-compose.yml           # Base services
-│   ├── docker-compose.routing.yml   # OSRM + GraphHopper
-│   ├── docker-compose.evolution.yml # Evolution API
-│   └── nginx/             # Reverse proxy + SSL
-└── .github/workflows/     # CI/CD
+│   │   ├── routes/            # API endpoints
+│   │   ├── middleware/        # Auth, rate limit, security
+│   │   ├── services/          # MinIO, OSRM, Evolution
+│   │   ├── db/                # Drizzle schema + migrations
+│   │   └── utils/             # Logger, validators
+│   ├── docker-compose.yml     # Local stack
+│   └── package.json
+│
+├── infra/                      # Infrastructure
+│   ├── docker-compose.yml     # Production stack
+│   ├── nginx.conf             # Reverse proxy
+│   └── init-scripts/          # DB initialization
+│
+├── load-test/                  # k6 load tests
+├── .github/workflows/          # CI/CD pipelines
+├── docs/                       # Documentation
+│   ├── SRS.md                 # Software Requirements Spec
+│   ├── ARCHITECTURE.md        # Architecture decisions
+│   ├── ROLLOUT_PLAN.md        # Gradual release plan
+│   └── SECURITY_AUDIT.md      # Security audit report
+│
+└── README.md
 ```
 
-## 🔧 Comandos Úteis
+## 🔧 Scripts Úteis
 
 ### Mobile
 ```bash
-cd mobile
-yarn start              # Expo CLI
-yarn android            # Emulador Android
-yarn ios                # Simulador iOS
+yarn start              # Expo dev server
+yarn android            # Run on Android
+yarn ios                # Run on iOS
 yarn lint               # ESLint
 yarn typecheck          # TypeScript check
-yarn test:unit          # Jest
-yarn test:e2e           # Detox
-eas build --profile development --platform android
-eas build --profile production --platform all
+yarn test:unit          # Jest unit tests
+yarn test:e2e           # Detox E2E tests
+yarn build:dev          # EAS development build
+yarn build:preview      # EAS preview build
+yarn build:prod         # EAS production build
+yarn build:local        # Local build (requires Xcode/Android Studio)
+yarn doctor             # Expo doctor
+yarn prebuild           # Generate native projects
 ```
 
 ### Backend
 ```bash
-cd backend
-yarn dev                # Hot reload
-yarn build              # Compila para dist/
-yarn db:generate        # Gera migrações Drizzle
-yarn db:migrate         # Aplica migrações
-yarn db:studio          # Drizzle Studio UI
-yarn test:unit          # Vitest
-yarn test:integration   # Testes com testcontainers
-```
-
-### Infraestrutura
-```bash
-cd infra
-docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-docker compose logs -f api
-./scripts/backup.sh
+yarn dev                # Dev server with hot reload
+yarn build              # TypeScript compile
+yarn lint               # ESLint
+yarn typecheck          # TypeScript check
+yarn test               # Unit tests
+yarn db:generate        # Generate Drizzle migrations
+yarn db:migrate         # Run migrations
+yarn db:studio          # Drizzle Studio
+yarn db:seed            # Seed test data
 ```
 
 ## 🧪 Testes
 
 ```bash
-# Mobile
-cd mobile && yarn test:unit --coverage
+# Unit tests
+cd mobile && yarn test:unit
+
+# E2E tests (requires emulator/simulator)
 cd mobile && yarn test:e2e
 
-# Backend
-cd backend && yarn test:unit --coverage
-cd backend && yarn test:integration
+# Load tests (k6)
+cd load-test && k6 run k6-script.js
+
+# Security audit
+cd backend && npm audit
 ```
 
-## 📦 CI/CD
+## 📦 Deploy
 
-- **GitHub Actions** para lint, typecheck, testes, SAST
-- **EAS Build** para builds mobile (development/preview/production)
-- **Docker Compose** para deploy backend (staging/production)
-- **Health checks** automáticos em todos os serviços
+### Preview/Staging
+```bash
+# Mobile
+cd mobile
+eas build --profile preview --platform all
+eas submit --platform android --profile preview
+eas submit --platform ios --profile preview
 
-## 🔐 Variáveis de Ambiente Principais
-
-### Backend (.env)
-```env
-DATABASE_URL=postgresql://user:pass@localhost:5432/entregafacil
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=your-32-char-secret
-BETTER_AUTH_SECRET=your-32-char-secret
-OSRM_BASE_URL=http://localhost:5000
-GRAPHHOPPER_BASE_URL=http://localhost:8989
-EVOLUTION_BASE_URL=http://localhost:8080
-EVOLUTION_API_KEY=your-evolution-key
-MINIO_ENDPOINT=localhost
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
+# Backend (via GitHub Actions on push to develop)
+git push origin develop
 ```
 
-### Mobile (.env)
-```env
-EXPO_PUBLIC_API_URL=https://api.entregafacil.app
-EXPO_PUBLIC_EVOLUTION_URL=https://evolution.entregafacil.app
-EXPO_PUBLIC_MAPBOX_TOKEN=optional
+### Produção
+```bash
+# Mobile
+cd mobile
+eas build --profile production --platform all
+eas submit --platform android --profile production
+eas submit --platform ios --profile production
+
+# Backend (via GitHub Actions on push to main + tag)
+git tag v1.0.0
+git push origin main --tags
 ```
+
+## 📊 Monitoramento
+
+- **Sentry**: Error tracking + Performance (mobile + backend)
+- **Grafana**: API metrics, latency, error rates, infrastructure
+- **Loki**: Log aggregation
+- **Prometheus**: Metrics collection
+- **Alertas**: PagerDuty/Slack para crash spikes, ANR, latency
+
+## 🔐 Segurança
+
+- **SAST**: ESLint Security + TypeScript strict mode
+- **DAST**: OWASP ZAP em CI
+- **Secrets**: GitLeaks no pre-commit + GitHub Secrets
+- **Dependencies**: npm audit + Dependabot
+- **Network**: Certificate pinning (produção)
+- **Data**: Criptografia em repouso (PostgreSQL) + TLS 1.3
+- **LGPD**: Opt-in WhatsApp, dados mínimos, direito ao esquecimento
 
 ## 📚 Documentação
 
-- [Visão e Escopo](docs/01-visao-e-escopo.md)
-- [Benchmarks Técnicos](docs/02-benchmarks.md)
-- [SRS Completo](docs/SRS.md)
-- [Arquitetura e UML](docs/03-arquitetura-e-uml.md)
-- [ADRs](docs/04-ADRs/)
-- [Backlog Scrum](docs/05-backlog.md)
-- [Plano de Entrega](docs/06-plano-de-entrega.md)
-- [Onboarding Mobile](docs/onboarding-mobile.md)
-- [Onboarding Backend](docs/onboarding-backend.md)
-- [Checklist LGPD](docs/lgpd-checklist.md)
-
-## 🛣️ Roadmap
-
-| Versão | Data | Features |
-|--------|------|----------|
-| **v0.1 (MVP)** | 10 semanas | Core: endereços, rotas, OSRM, navegação simples, comprovação, WhatsApp, offline, relatórios |
-| **v0.2** | +6 semanas | MapLibre Navigation SDK nativo, GraphHopper VRP, dashboard web gestor |
-| **v1.0 (GA)** | +12 semanas | Integração iFood/Uber APIs, IA previsão demanda, multi-idioma, gamificação |
+- [SRS - Especificação de Requisitos](docs/SRS.md)
+- [Arquitetura e ADRs](docs/ARCHITECTURE.md)
+- [Plano de Rollout Gradual](docs/ROLLOUT_PLAN.md)
+- [Auditoria de Segurança](docs/SECURITY_AUDIT.md)
+- [Guia EAS Build](mobile/EAS_BUILD_GUIDE.md)
+- [Load Testing](load-test/README.md)
 
 ## 🤝 Contribuindo
 
 1. Fork o projeto
 2. Crie branch feature (`git checkout -b feature/nova-funcionalidade`)
-3. Commit seguindo [Conventional Commits](https://www.conventionalcommits.org/pt-br/v1.0.0/)
-4. Push e abra Pull Request
-5. CI deve passar (lint, typecheck, testes, SAST)
+3. Commit seguindo [Conventional Commits](https://www.conventionalcommits.org/)
+4. Push para branch (`git push origin feature/nova-funcionalidade`)
+5. Abra Pull Request
+
+### Padrões de Commit
+```
+feat(scope): descrição curta
+fix(scope): descrição curta
+docs(scope): descrição curta
+refactor(scope): descrição curta
+test(scope): descrição curta
+chore(scope): descrição curta
+```
 
 ## 📄 Licença
 
-MIT License - veja [LICENSE](LICENSE) para detalhes.
+Proprietary - Todos os direitos reservados © 2024 EntregaFácil
+
+## 📞 Suporte
+
+- **Email**: suporte@entregafacil.app
+- **WhatsApp**: +55 11 99999-9999
+- **Issues**: GitHub Issues (para bugs/feature requests)
 
 ---
 
-**Desenvolvido com ❤️ para motoboys e motoristas de entrega do Brasil**
+**Versão**: 1.0.0  
+**Última atualização**: 2024-11-18  
+**Expo SDK**: 51 | **React Native**: 0.74 | **Node.js**: 20 LTS

@@ -1,0 +1,7 @@
+# Fastlane iOS Appfile
+# Configuração para deploy na App Store Connect
+
+app_identifier "com.entregafacil.app"
+apple_id "dev@entregafacil.app"
+team_id "ABC123DEFG"  # Substitua pelo seu Team ID
+itc_team_id "12345678"  # App Store Connect Team ID (opcional, se diferente do team_id)

@@ -1,0 +1,212 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to test'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - ios
+          - both
+
+jobs:
+  # Android E2E Tests
+  e2e-android:
+    name: E2E Android
+    if: github.event.inputs.platform == 'android' || github.event.inputs.platform == 'both' || github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          ndk-version: r26b
+          emulator: true
+          arch: x86_64
+
+      - name: Create AVD
+        run: |
+          echo "no" | avdmanager create avd -n pixel_7_pro_api_34 -k "system-images;android-34;google_apis;x86_64" --force
+          echo "AVD created"
+
+      - name: Start Emulator
+        run: |
+          $ANDROID_HOME/emulator/emulator -avd pixel_7_pro_api_34 -no-snapshot-load -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
+          $ANDROID_HOME/platform-tools/adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+          echo "Emulator ready"
+
+      - name: Install Dependencies
+        run: |
+          cd mobile
+          yarn install --frozen-lockfile
+
+      - name: Build Debug APK
+        run: |
+          cd mobile
+          yarn prebuild --platform android --clean
+          ./gradlew assembleDebug --no-daemon -x lint
+
+      - name: Run Detox Tests
+        run: |
+          cd mobile
+          yarn test:e2e --configuration android
+        env:
+          DETOX_CONFIGURATION: android
+          CI: true
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-android-artifacts
+          path: |
+            mobile/e2e/reports/
+            mobile/android/app/build/reports/
+          retention-days: 30
+
+      - name: Upload Screenshots on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-android-screenshots
+          path: mobile/e2e/screenshots/
+          retention-days: 30
+
+  # iOS E2E Tests (macOS runner required)
+  e2e-ios:
+    name: E2E iOS
+    if: github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'both' || github.event_name != 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.2'
+
+      - name: Install Dependencies
+        run: |
+          cd mobile
+          yarn install --frozen-lockfile
+
+      - name: Install CocoaPods
+        run: |
+          cd mobile
+          npx pod-install
+
+      - name: Build Debug App
+        run: |
+          cd mobile
+          yarn prebuild --platform ios --clean
+          xcodebuild -workspace ios/EntregaFácil.xcworkspace \
+            -scheme EntregaFácil \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath ios/build \
+            -quiet
+
+      - name: Boot Simulator
+        run: |
+          xcrun simctl boot "iPhone 15"
+          xcrun simctl list devices
+
+      - name: Run Detox Tests
+        run: |
+          cd mobile
+          yarn test:e2e --configuration ios
+        env:
+          DETOX_CONFIGURATION: ios
+          CI: true
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-ios-artifacts
+          path: |
+            mobile/e2e/reports/
+            mobile/ios/build/
+          retention-days: 30
+
+      - name: Upload Screenshots on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-ios-screenshots
+          path: mobile/e2e/screenshots/
+          retention-days: 30
+
+  # Summary
+  e2e-summary:
+    name: E2E Summary
+    needs: [e2e-android, e2e-ios]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Results
+        run: |
+          ANDROID_RESULT="${{ needs.e2e-android.result }}"
+          IOS_RESULT="${{ needs.e2e-ios.result }}"
+          
+          echo "Android E2E: $ANDROID_RESULT"
+          echo "iOS E2E: $IOS_RESULT"
+          
+          if [[ "$ANDROID_RESULT" == "failure" || "$IOS_RESULT" == "failure" ]]; then
+            echo "❌ Some E2E tests failed"
+            exit 1
+          else
+            echo "✅ All E2E tests passed"
+          fi
+
+      - name: Notify on Failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#test-results'
+          text: '❌ E2E Tests Failed for EntregaFácil'
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

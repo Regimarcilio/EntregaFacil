@@ -22,7 +22,13 @@ export interface AuthVariables {
   };
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-min-32-chars-for-hs256';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable must be set');
+}
+if (JWT_SECRET.length < 32) {
+  throw new Error('JWT_SECRET must be at least 32 characters for HS256');
+}
 
 export const authMiddleware = createMiddleware<{ Variables: AuthVariables }>(
   async (c, next) => {

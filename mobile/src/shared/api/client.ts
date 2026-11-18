@@ -289,14 +289,29 @@ class APIClient {
     return this.get(`/deliveries`, { params: { routeId } });
   }
 
-  async uploadProof(file: any, metadata: any): Promise<any> {
+  async uploadProof(fileUri: string, metadata: any): Promise<any> {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', {
+      uri: fileUri,
+      type: 'image/jpeg',
+      name: `proof_${Date.now()}.jpg`,
+    } as any);
     formData.append('metadata', JSON.stringify(metadata));
 
     return this.client.post('/deliveries/proof', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000,
+    });
+  }
+
+  async uploadSignature(base64: string): Promise<any> {
+    const formData = new FormData();
+    formData.append('base64', base64);
+    formData.append('metadata', JSON.stringify({ timestamp: new Date().toISOString() }));
+
+    return this.client.post('/deliveries/assinatura', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
     });
   }
 

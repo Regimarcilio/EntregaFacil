@@ -1,5 +1,8 @@
 import { DefaultTheme, DarkTheme } from 'react-native-paper';
 
+// ===========================================
+// Base Colors (WCAG AA compliant)
+// ===========================================
 export const colors = {
   primary: '#0066CC',
   primaryLight: '#4DA3FF',
@@ -24,6 +27,16 @@ export const colors = {
   borderFocus: '#0066CC',
   overlay: 'rgba(15, 23, 42, 0.5)',
   shadow: 'rgba(0, 0, 0, 0.1)',
+  
+  // Accessibility aliases
+  onPrimary: '#FFFFFF',
+  onSecondary: '#000000',
+  onError: '#FFFFFF',
+  onSuccess: '#FFFFFF',
+  onWarning: '#000000',
+  onBackground: '#0F172A',
+  onSurface: '#0F172A',
+  onSurfaceVariant: '#475569',
 };
 
 export const darkColors = {
@@ -31,6 +44,9 @@ export const darkColors = {
   primary: '#4DA3FF',
   primaryLight: '#7BC0FF',
   primaryDark: '#1E90FF',
+  secondary: '#00D4AA',
+  secondaryLight: '#4DE8C4',
+  secondaryDark: '#00A380',
   background: '#0F172A',
   surface: '#1E293B',
   surfaceVariant: '#334155',
@@ -41,6 +57,16 @@ export const darkColors = {
   borderFocus: '#4DA3FF',
   overlay: 'rgba(0, 0, 0, 0.7)',
   shadow: 'rgba(0, 0, 0, 0.3)',
+  
+  // Accessibility aliases
+  onPrimary: '#000000',
+  onSecondary: '#000000',
+  onError: '#FFFFFF',
+  onSuccess: '#000000',
+  onWarning: '#000000',
+  onBackground: '#F8FAFC',
+  onSurface: '#F8FAFC',
+  onSurfaceVariant: '#CBD5E1',
 };
 
 export const spacing = {
@@ -50,6 +76,13 @@ export const spacing = {
   lg: 24,
   xl: 32,
   xxl: 48,
+};
+
+// Touch target sizes (accessibility)
+export const touchTargets = {
+  minimum: 48,     // WCAG minimum
+  recommended: 56, // Material Design recommended
+  comfortable: 64, // For motor impairments
 };
 
 export const borderRadius = {
@@ -90,6 +123,34 @@ export const typography = {
     medium: '500',
     bold: '700',
   },
+};
+
+// Accessible typography scale
+export const a11yTypography = {
+  // Display
+  displayLarge: { fontSize: 57, fontWeight: '700', lineHeight: 64 },
+  displayMedium: { fontSize: 45, fontWeight: '700', lineHeight: 52 },
+  displaySmall: { fontSize: 36, fontWeight: '600', lineHeight: 44 },
+  
+  // Headline
+  headlineLarge: { fontSize: 32, fontWeight: '600', lineHeight: 40 },
+  headlineMedium: { fontSize: 28, fontWeight: '600', lineHeight: 36 },
+  headlineSmall: { fontSize: 24, fontWeight: '600', lineHeight: 32 },
+  
+  // Title
+  titleLarge: { fontSize: 22, fontWeight: '600', lineHeight: 28 },
+  titleMedium: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
+  titleSmall: { fontSize: 14, fontWeight: '600', lineHeight: 20 },
+  
+  // Body
+  bodyLarge: { fontSize: 16, fontWeight: '400', lineHeight: 24 },
+  bodyMedium: { fontSize: 14, fontWeight: '400', lineHeight: 20 },
+  bodySmall: { fontSize: 12, fontWeight: '400', lineHeight: 16 },
+  
+  // Label
+  labelLarge: { fontSize: 14, fontWeight: '500', lineHeight: 20 },
+  labelMedium: { fontSize: 12, fontWeight: '500', lineHeight: 16 },
+  labelSmall: { fontSize: 11, fontWeight: '500', lineHeight: 16 },
 };
 
 export const shadows = {
@@ -168,16 +229,16 @@ export const lightTheme = {
     background: colors.background,
     surface: colors.surface,
     surfaceVariant: colors.surfaceVariant,
-    onPrimary: '#FFFFFF',
+    onPrimary: colors.onPrimary,
     onPrimaryContainer: colors.primaryDark,
-    onSecondary: '#FFFFFF',
+    onSecondary: colors.onSecondary,
     onSecondaryContainer: colors.secondaryDark,
     onTertiary: '#FFFFFF',
-    onError: '#FFFFFF',
+    onError: colors.onError,
     onErrorContainer: colors.error,
-    onBackground: colors.text,
-    onSurface: colors.text,
-    onSurfaceVariant: colors.textSecondary,
+    onBackground: colors.onBackground,
+    onSurface: colors.onSurface,
+    onSurfaceVariant: colors.onSurfaceVariant,
     outline: colors.border,
     outlineVariant: colors.border,
     shadow: colors.shadow,
@@ -185,6 +246,13 @@ export const lightTheme = {
     inverseSurface: darkColors.surface,
     inverseOnSurface: darkColors.text,
     inversePrimary: darkColors.primary,
+    // Custom accessible colors
+    success: colors.success,
+    successContainer: colors.successLight,
+    warning: colors.warning,
+    warningContainer: colors.warningLight,
+    onSuccess: colors.onSuccess,
+    onWarning: colors.onWarning,
   },
   roundness: borderRadius.md,
   animation: { scale: 1.0 },
@@ -204,16 +272,16 @@ export const darkTheme = {
     background: darkColors.background,
     surface: darkColors.surface,
     surfaceVariant: darkColors.surfaceVariant,
-    onPrimary: '#000000',
+    onPrimary: darkColors.onPrimary,
     onPrimaryContainer: darkColors.primaryLight,
-    onSecondary: '#000000',
+    onSecondary: darkColors.onSecondary,
     onSecondaryContainer: darkColors.secondaryLight,
     onTertiary: '#FFFFFF',
-    onError: '#FFFFFF',
+    onError: darkColors.onError,
     onErrorContainer: colors.error,
-    onBackground: darkColors.text,
-    onSurface: darkColors.text,
-    onSurfaceVariant: darkColors.textSecondary,
+    onBackground: darkColors.onBackground,
+    onSurface: darkColors.onSurface,
+    onSurfaceVariant: darkColors.onSurfaceVariant,
     outline: darkColors.border,
     outlineVariant: darkColors.border,
     shadow: darkColors.shadow,
@@ -221,6 +289,13 @@ export const darkTheme = {
     inverseSurface: colors.surface,
     inverseOnSurface: colors.text,
     inversePrimary: colors.primary,
+    // Custom accessible colors
+    success: colors.success,
+    successContainer: colors.successLight,
+    warning: colors.warning,
+    warningContainer: colors.warningLight,
+    onSuccess: darkColors.onSuccess,
+    onWarning: darkColors.onWarning,
   },
   roundness: borderRadius.md,
   animation: { scale: 1.0 },

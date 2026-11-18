@@ -1,0 +1,352 @@
+name: EAS Build & Deploy
+
+on:
+  push:
+    branches: [develop, main]
+    tags: ['v*']
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      build_profile:
+        description: 'Build profile to use'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+      platform:
+        description: 'Platform to build'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - android
+          - ios
+
+env:
+  EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+  NODE_VERSION: '20'
+
+jobs:
+  # Lint, typecheck, tests
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Install dependencies
+        run: cd mobile && yarn install --frozen-lockfile
+
+      - name: TypeScript check
+        run: cd mobile && yarn typecheck
+
+      - name: ESLint
+        run: cd mobile && yarn lint
+
+      - name: Unit tests
+        run: cd mobile && yarn test --ci --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          directory: ./mobile/coverage
+          flags: mobile
+
+  # Build Android
+  build-android:
+    name: Build Android (${{ matrix.profile }})
+    needs: quality
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [development, preview, production]
+        include:
+          - profile: development
+            branch: develop
+          - profile: preview
+            branch: develop
+          - profile: production
+            branch: main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
+      - name: Install dependencies
+        run: cd mobile && yarn install --frozen-lockfile
+
+      - name: Configure EAS
+        run: |
+          cd mobile
+          echo "EAS_PROJECT_ID=${{ secrets.EAS_PROJECT_ID }}" >> $GITHUB_ENV
+          eas whoami
+
+      - name: Build Android
+        run: |
+          cd mobile
+          eas build --platform android --profile ${{ matrix.profile }} --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: entregafacil
+          SENTRY_PROJECT: mobile
+
+      - name: Wait for build completion
+        run: |
+          cd mobile
+          eas build:list --platform android --profile ${{ matrix.profile }} --limit 1 --json > build.json
+          BUILD_ID=$(cat build.json | jq -r '.[0].id')
+          eas build:wait --id $BUILD_ID
+
+      - name: Download artifact (APK/AAB)
+        run: |
+          cd mobile
+          eas build:list --platform android --profile ${{ matrix.profile }} --limit 1 --json > build.json
+          ARTIFACT_URL=$(cat build.json | jq -r '.[0].artifacts.buildUrl')
+          if [[ "$ARTIFACT_URL" != "null" ]]; then
+            curl -L "$ARTIFACT_URL" -o "entregafacil-${{ matrix.profile }}.apk"
+            echo "ARTIFACT_PATH=entregafacil-${{ matrix.profile }}.apk" >> $GITHUB_ENV
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: env.ARTIFACT_PATH != ''
+        with:
+          name: entregafacil-android-${{ matrix.profile }}
+          path: mobile/entregafacil-${{ matrix.profile }}.apk
+          retention-days: 30
+
+  # Build iOS
+  build-ios:
+    name: Build iOS (${{ matrix.profile }})
+    needs: quality
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        profile: [development, preview, production]
+        include:
+          - profile: development
+            branch: develop
+          - profile: preview
+            branch: develop
+          - profile: production
+            branch: main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
+      - name: Install dependencies
+        run: cd mobile && yarn install --frozen-lockfile
+
+      - name: Configure EAS
+        run: |
+          cd mobile
+          echo "EAS_PROJECT_ID=${{ secrets.EAS_PROJECT_ID }}" >> $GITHUB_ENV
+          eas whoami
+
+      - name: Build iOS
+        run: |
+          cd mobile
+          eas build --platform ios --profile ${{ matrix.profile }} --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: entregafacil
+          SENTRY_PROJECT: mobile
+
+      - name: Wait for build completion
+        run: |
+          cd mobile
+          eas build:list --platform ios --profile ${{ matrix.profile }} --limit 1 --json > build.json
+          BUILD_ID=$(cat build.json | jq -r '.[0].id')
+          eas build:wait --id $BUILD_ID
+
+      - name: Download artifact (IPA)
+        run: |
+          cd mobile
+          eas build:list --platform ios --profile ${{ matrix.profile }} --limit 1 --json > build.json
+          ARTIFACT_URL=$(cat build.json | jq -r '.[0].artifacts.buildUrl')
+          if [[ "$ARTIFACT_URL" != "null" ]]; then
+            curl -L "$ARTIFACT_URL" -o "entregafacil-${{ matrix.profile }}.ipa"
+            echo "ARTIFACT_PATH=entregafacil-${{ matrix.profile }}.ipa" >> $GITHUB_ENV
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: env.ARTIFACT_PATH != ''
+        with:
+          name: entregafacil-ios-${{ matrix.profile }}
+          path: mobile/entregafacil-${{ matrix.profile }}.ipa
+          retention-days: 30
+
+  # Deploy to stores (manual approval for production)
+  deploy-android:
+    name: Deploy Android to Play Store
+    needs: build-android
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: entregafacil-android-production
+          path: ./artifacts
+
+      - name: Setup Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ./mobile/fastlane/android
+
+      - name: Deploy to Internal Track
+        run: |
+          bundle exec fastlane internal
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        working-directory: ./mobile/fastlane/android
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: ./artifacts/entregafacil-production.aab
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  deploy-ios:
+    name: Deploy iOS to TestFlight / App Store
+    needs: build-ios
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: macos-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: entregafacil-ios-production
+          path: ./artifacts
+
+      - name: Setup Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ./mobile/fastlane/ios
+
+      - name: Deploy to TestFlight
+        run: |
+          bundle exec fastlane testflight
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        working-directory: ./mobile/fastlane/ios
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: ./artifacts/entregafacil-production.ipa
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  # OTA Update (expo-updates)
+  ota-update:
+    name: Publish OTA Update
+    needs: [build-android, build-ios]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'yarn'
+          cache-dependency-path: mobile/yarn.lock
+
+      - name: Install dependencies
+        run: cd mobile && yarn install --frozen-lockfile
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
+      - name: Publish OTA Update
+        run: |
+          cd mobile
+          eas update --branch production --message "Release ${{ github.sha }}" --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  # Notify on failure
+  notify-failure:
+    name: Notify Failure
+    needs: [build-android, build-ios, deploy-android, deploy-ios, ota-update]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#deploy-alerts'
+          text: '❌ EAS Build/Deploy failed for EntregaFácil'
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

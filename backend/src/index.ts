@@ -5,6 +5,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import { HTTPException } from 'hono/http-exception';
 import { authMiddleware } from './middleware/auth';
 import { apiRateLimiter } from './middleware/rateLimit';
+import { securityHeaders, apiSecurityHeaders, webhookSecurityHeaders } from './middleware/securityHeaders';
 import { logger } from './utils/logger';
 import { closePool } from './db';
 import { closeRedis } from './services/redis';
@@ -19,13 +20,30 @@ import syncRoutes from './routes/sync';
 
 const app = new Hono();
 
+// Security headers (must be first)
+app.use('*', securityHeaders());
+app.use('/api/*', apiSecurityHeaders());
+app.post('/webhook/*', webhookSecurityHeaders());
+
 // Middlewares globais
 app.use('*', honoLogger());
 app.use('*', prettyJSON());
+
+const isProduction = process.env.NODE_ENV === 'production';
+const corsOrigins = process.env.CORS_ORIGIN?.split(',') || [];
+
+if (isProduction && corsOrigins.length === 0) {
+  throw new Error('CORS_ORIGIN must be set in production');
+}
+
+const allowedOrigins = corsOrigins.length > 0 
+  ? corsOrigins 
+  : ['http://localhost:8081', 'exp://localhost:8081', 'http://localhost:3000'];
+
 app.use(
   '*',
   cors({
-    origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:8081', 'exp://localhost:8081'],
+    origin: allowedOrigins,
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
     credentials: true,

@@ -15,13 +15,23 @@ const DEFAULT_OPTIONS: RateLimitOptions = {
   keyPrefix: 'ratelimit',
 };
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 export function rateLimiter(options: Partial<RateLimitOptions> = {}) {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
   return createMiddleware(async (c, next) => {
     const redis = getRedis();
+    
+    // Fail-closed in production: if no Redis, reject requests
     if (!redis) {
-      // Se não tem Redis, pula rate limiting (desenvolvimento)
+      if (isProduction) {
+        return c.json(
+          { error: 'Serviço temporariamente indisponível' },
+          503
+        );
+      }
+      // Desenvolvimento: fail-open
       return next();
     }
 
@@ -56,7 +66,14 @@ export function rateLimiter(options: Partial<RateLimitOptions> = {}) {
 
       await next();
     } catch (error) {
-      // Em caso de erro no Redis, permite a requisição (fail-open)
+      // Fail-closed in production, fail-open in development
+      if (isProduction) {
+        console.error('Rate limiter error:', error);
+        return c.json(
+          { error: 'Serviço temporariamente indisponível' },
+          503
+        );
+      }
       console.error('Rate limiter error:', error);
       await next();
     }
