@@ -9,7 +9,8 @@ import { entregas } from '../db/schema/entregas';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth';
 import { logger } from '../utils/logger';
-import { apiClient } from '../../mobile/src/shared/api/client'; // Reutiliza tipos se necessário
+import { osrmService, OSRMTrip } from '../services/osrm';
+import { graphhopperService, GHVRPRequest, waypointsToGHJobs, vehicleToGHVehicle } from '../services/graphhopper';
 
 const routes = new Hono();
 
@@ -314,7 +315,7 @@ routes.delete('/:id', zValidator('param', z.object({ id: z.string().uuid() })), 
   return c.json({ message: 'Rota removida com sucesso' });
 });
 
-// POST /routes/:id/optimize - Otimiza rota com OSRM
+// POST /routes/:id/optimize - Otimiza rota com OSRM (TSP guloso)
 routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid() })), zValidator('json', optimizeRouteSchema), async (c) => {
   const user = c.get('user');
   const { id } = c.req.valid('param');
@@ -339,30 +340,20 @@ routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid(
     return c.json({ error: 'Mínimo 2 waypoints para otimizar' }, 400);
   }
 
-  // Prepara coordenadas para OSRM (formato: lng,lat)
-  const coordinates = waypoints.map(w => `${w.longitude},${w.latitude}`).join(';');
-  
+  // Prepara coordenadas para OSRM [lng, lat]
+  const coordinates = waypoints.map(w => [w.longitude, w.latitude] as [number, number]);
+
   try {
-    // Chama OSRM Trip endpoint
-    const osrmUrl = `${process.env.OSRM_BASE_URL || 'http://localhost:5000'}/trip/v1/driving/${coordinates}`;
-    const params = new URLSearchParams({
-      steps: 'true',
+    // Usa OSRM Service (com cache)
+    const osrmResult = await osrmService.trip(coordinates, {
       source,
       destination,
-      roundtrip: roundtrip.toString(),
+      roundtrip,
+      steps: true,
+      annotations: 'duration,distance',
       geometries: 'polyline6',
       overview: 'simplified',
-      annotations: 'duration,distance',
     });
-
-    const response = await fetch(`${osrmUrl}?${params}`);
-    
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`OSRM error: ${error}`);
-    }
-
-    const osrmResult = await response.json();
 
     if (osrmResult.code !== 'Ok' || !osrmResult.waypoints || osrmResult.waypoints.length === 0) {
       throw new Error('OSRM não encontrou rota válida');
@@ -383,9 +374,10 @@ routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid(
       });
 
     // Calcula métricas
-    const totalDistance = osrmResult.trips[0].distance / 1000; // km
-    const totalDuration = Math.round(osrmResult.trips[0].duration / 60); // minutos
-    const geometry = osrmResult.trips[0].geometry; // polyline6
+    const trip = osrmResult.trips[0];
+    const totalDistance = trip.distance / 1000; // km
+    const totalDuration = Math.round(trip.duration / 60); // minutos
+    const geometry = trip.geometry; // polyline6
 
     const metricas = {
       distanciaTotalKm: Math.round(totalDistance * 10) / 10,
@@ -394,7 +386,7 @@ routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid(
       problemas: 0,
       canceladas: 0,
       ganhoEstimado: 0,
-      economiaVsManual: 0, // TODO: calcular vs ordem original
+      economiaVsManual: 0,
     };
 
     const [updated] = await db.update(rotas)
@@ -408,7 +400,7 @@ routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid(
       .where(eq(rotas.id, id))
       .returning();
 
-    logger.info({ rotaId: id, distance: totalDistance, duration: totalDuration }, 'Rota otimizada');
+    logger.info({ rotaId: id, distance: totalDistance, duration: totalDuration }, 'Rota otimizada com OSRM');
 
     return c.json({
       ...updated,
@@ -419,8 +411,122 @@ routes.post('/:id/optimize', zValidator('param', z.object({ id: z.string().uuid(
     });
 
   } catch (error) {
-    logger.error({ err: error, rotaId: id }, 'Falha ao otimizar rota');
-    return c.json({ error: 'Falha ao otimizar rota: ' + (error instanceof Error ? error.message : 'Erro desconhecido') }, 500);
+    logger.error({ err: error, rotaId: id }, 'Falha ao otimizar rota com OSRM');
+    
+    // Fallback para GraphHopper se OSRM falhar
+    try {
+      logger.info({ rotaId: id }, 'Tentando fallback GraphHopper...');
+      return await optimizeWithGraphHopper(c, db, rota, waypoints, id);
+    } catch (ghError) {
+      logger.error({ err: ghError, rotaId: id }, 'GraphHopper fallback also failed');
+      return c.json({ error: 'Falha ao otimizar rota: ' + (error instanceof Error ? error.message : 'Erro desconhecido') }, 500);
+    }
+  }
+});
+
+// POST /routes/:id/optimize-vrp - Otimização avançada com GraphHopper (VRP com restrições)
+routes.post('/:id/optimize-vrp', zValidator('param', z.object({ id: z.string().uuid() })), async (c) => {
+  const user = c.get('user');
+  const { id } = c.req.valid('param');
+  const db = getDB();
+
+  const [rota] = await db.select()
+    .from(rotas)
+    .where(and(eq(rotas.id, id), eq(rotas.motoristaId, user.motoristaId)))
+    .limit(1);
+
+  if (!rota) {
+    return c.json({ error: 'Rota não encontrada' }, 404);
+  }
+
+  if (rota.status === 'em_andamento' || rota.status === 'concluida') {
+    return c.json({ error: 'Não é possível otimizar rota em andamento ou finalizada' }, 400);
+  }
+
+  const waypoints = rota.waypoints as any[];
+  if (waypoints.length < 2) {
+    return c.json({ error: 'Mínimo 2 waypoints para otimizar' }, 400);
+  }
+
+  try {
+    // Busca veículo para capacidade
+    const [vehicle] = await db.select()
+      .from(veiculos)
+      .where(eq(veiculos.id, rota.veiculoId))
+      .limit(1);
+
+    // Converte para formato GraphHopper
+    const jobs = waypointsToGHJobs(waypoints);
+    const vehicleGH = vehicleToGHVehicle(
+      { id: rota.veiculoId, capacity: 50, skills: ['delivery'] },
+      [waypoints[0].longitude, waypoints[0].latitude]
+    );
+
+    const vrpRequest: GHVRPRequest = {
+      jobs,
+      vehicles: [vehicleGH],
+      objectives: [{ type: 'min', value: 'transport_time' }],
+      configuration: {
+        routing: { calc_points: true },
+        optimization: { max_tour_duration: 12 * 3600 }, // 12h max
+      },
+    };
+
+    const ghResult = await graphhopperService.optimizeVRP(vrpRequest);
+
+    if (ghResult.error || !ghResult.solution?.routes?.length) {
+      throw new Error(ghResult.error || 'GraphHopper não encontrou solução');
+    }
+
+    const route = ghResult.solution.routes[0];
+    
+    // Reconstrói waypoints ordenados pela solução VRP
+    const orderedWaypoints = route.activities
+      .filter(a => a.type === 'job' && a.job_id)
+      .map((activity, idx) => {
+        const originalWp = waypoints.find(w => w.id === activity.job_id);
+        return originalWp ? { ...originalWp, ordem: idx } : null;
+      })
+      .filter(Boolean);
+
+    // Métricas da solução VRP
+    const totalDistance = route.distance / 1000; // km
+    const totalDuration = Math.round(route.transport_time / 60); // min
+
+    const metricas = {
+      distanciaTotalKm: Math.round(totalDistance * 10) / 10,
+      tempoEstimadoMin: totalDuration,
+      entregues: 0,
+      problemas: 0,
+      canceladas: 0,
+      ganhoEstimado: 0,
+      economiaVsManual: 0,
+    };
+
+    const [updated] = await db.update(rotas)
+      .set({
+        status: 'otimizada',
+        waypoints: orderedWaypoints,
+        geometry: route.points ? { type: 'LineString', coordinates: route.points.coordinates } : null,
+        metricas,
+        updatedAt: new Date(),
+      })
+      .where(eq(rotas.id, id))
+      .returning();
+
+    logger.info({ rotaId: id, distance: totalDistance, duration: totalDuration }, 'Rota otimizada com GraphHopper VRP');
+
+    return c.json({
+      ...updated,
+      graphhopper: {
+        solution: ghResult.solution,
+        unassigned: ghResult.solution.unassigned,
+      },
+    });
+
+  } catch (error) {
+    logger.error({ err: error, rotaId: id }, 'Falha ao otimizar rota com GraphHopper VRP');
+    return c.json({ error: 'Falha na otimização VRP: ' + (error instanceof Error ? error.message : 'Erro desconhecido') }, 500);
   }
 });
 
@@ -544,5 +650,118 @@ function decodePolyline(encoded: string): number[][] {
 
 // Import crypto
 import { crypto } from 'crypto';
+
+// Fallback GraphHopper para otimização TSP
+async function optimizeWithGraphHopper(c: any, db: any, rota: any, waypoints: any[], id: string) {
+  const jobs = waypointsToGHJobs(waypoints);
+  const [vehicle] = await db.select()
+    .from(veiculos)
+    .where(eq(veiculos.id, rota.veiculoId))
+    .limit(1);
+
+  const vehicleGH = vehicleToGHVehicle(
+    { id: rota.veiculoId, capacity: 50, skills: ['delivery'] },
+    [waypoints[0].longitude, waypoints[0].latitude]
+  );
+
+  const vrpRequest = {
+    jobs,
+    vehicles: [vehicleGH],
+    objectives: [{ type: 'min', value: 'transport_time' }],
+    configuration: {
+      routing: { calc_points: true },
+      optimization: { max_tour_duration: 12 * 3600 },
+    },
+  };
+
+  const ghResult = await graphhopperService.optimizeVRP(vrpRequest);
+
+  if (ghResult.error || !ghResult.solution?.routes?.length) {
+    throw new Error(ghResult.error || 'GraphHopper não encontrou solução');
+  }
+
+  const route = ghResult.solution.routes[0];
+  
+  const orderedWaypoints = route.activities
+    .filter((a: any) => a.type === 'job' && a.job_id)
+    .map((activity: any, idx: number) => {
+      const originalWp = waypoints.find((w: any) => w.id === activity.job_id);
+      return originalWp ? { ...originalWp, ordem: idx } : null;
+    })
+    .filter(Boolean);
+
+  const totalDistance = route.distance / 1000;
+  const totalDuration = Math.round(route.transport_time / 60);
+
+  const metricas = {
+    distanciaTotalKm: Math.round(totalDistance * 10) / 10,
+    tempoEstimadoMin: totalDuration,
+    entregues: 0,
+    problemas: 0,
+    canceladas: 0,
+    ganhoEstimado: 0,
+    economiaVsManual: 0,
+  };
+
+  const [updated] = await db.update(rotas)
+    .set({
+      status: 'otimizada',
+      waypoints: orderedWaypoints,
+      geometry: route.points ? { type: 'LineString', coordinates: route.points.coordinates } : null,
+      metricas,
+      updatedAt: new Date(),
+    })
+    .where(eq(rotas.id, id))
+    .returning();
+
+  logger.info({ rotaId: id, distance: totalDistance, duration: totalDuration }, 'Rota otimizada com GraphHopper (fallback)');
+
+  return c.json({
+    ...updated,
+    graphhopper: {
+      solution: ghResult.solution,
+      unassigned: ghResult.solution.unassigned,
+    },
+  });
+}
+
+// Helper: Decode polyline6 (Google encoded polyline)
+function decodePolyline(encoded: string): number[][] {
+  const points: number[][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += deltaLat;
+
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += deltaLng;
+
+    points.push([lng / 1e6, lat / 1e6]); // GeoJSON: [lng, lat]
+  }
+
+  return points;
+}
 
 export default routes;
